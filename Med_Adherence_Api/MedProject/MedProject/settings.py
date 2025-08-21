@@ -18,6 +18,23 @@ INSTALLED_APPS = [
     "Adherence_tracker",
 ]
 
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [BASE_DIR / "templates"],   # optional custom templates directory
+        'APP_DIRS': True,                   # enables template discovery inside apps
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
+
 AUTH_USER_MODEL = "Adherence_tracker.User"
 
 REST_FRAMEWORK = {
