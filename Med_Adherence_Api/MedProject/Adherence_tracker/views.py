@@ -98,28 +98,36 @@ class MedicationScheduleViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         base = MedicationSchedule.objects.select_related("patient", "patient__user")
+
         if user.role == "admin":
             return base
         if user.role == "patient":
             return base.filter(patient__user=user)
         if user.role == "doctor":
             try:
-                doc = user.doctor_profile
-                return base.filter(patient__in=doc.patients.all())
-            except DoctorProfile.DoesNotExist:
+                return base.filter(patient__in=user.doctor_profile.patients.all())
+            except:
                 return base.none()
         return base.none()
 
     def perform_create(self, serializer):
         user = self.request.user
-        patient = serializer.validated_data["patient"]
-        if user.role == "patient" and patient.user_id != user.id:
-            raise PermissionError("patients can only create for themselves")
-        if user.role == "doctor":
-            doc = user.doctor_profile
-            if not doc.patients.filter(pk=patient.pk).exists():
+
+        if user.role == "patient":
+            # 👇 auto-assign patient, no need to pass it in request
+            serializer.save(patient=user.patient_profile)
+
+        elif user.role == "doctor":
+            patient = serializer.validated_data.get("patient")
+            if not patient:
+                raise PermissionError("doctor must specify patient")
+            if not user.doctor_profile.patients.filter(pk=patient.pk).exists():
                 raise PermissionError("doctor not assigned to this patient")
-        serializer.save()
+            serializer.save()
+
+        else:  # admin
+            serializer.save()
+
 
 
 # ---------- ACTIVITIES ----------
@@ -143,6 +151,25 @@ class ActivityViewSet(viewsets.ModelViewSet):
                 return base.none()
         return base.none()
 
+    def perform_create(self, serializer):
+        user = self.request.user
+        if user.role == "patient":
+            # Patients can only log activities for their own schedules
+            schedule_id = self.request.data.get("schedule")
+            if not schedule_id:
+                raise ValidationError({"schedule": "This field is required."})
+            try:
+                schedule = MedicationSchedule.objects.get(pk=schedule_id, patient__user=user)
+            except MedicationSchedule.DoesNotExist:
+                raise PermissionDenied("You can only log activities for your own schedules.")
+            serializer.save(schedule=schedule)
+        elif user.role == "doctor":
+            # Doctors cannot create activities
+            raise PermissionDenied("Doctors cannot create activities.")
+        else:
+            # Admin or system users
+            serializer.save()
+
     def update(self, request, *args, **kwargs):
         if request.user.role == "doctor":
             return Response({"detail": "doctors cannot modify activities"}, status=403)
@@ -152,6 +179,8 @@ class ActivityViewSet(viewsets.ModelViewSet):
         if request.user.role == "doctor":
             return Response({"detail": "doctors cannot delete activities"}, status=403)
         return super().destroy(request, *args, **kwargs)
+ 
+
 
 
 # ---------- ANALYTICS ----------
