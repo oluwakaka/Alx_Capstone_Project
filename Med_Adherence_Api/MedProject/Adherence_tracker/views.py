@@ -1,3 +1,5 @@
+from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -25,7 +27,10 @@ class RegisterView(APIView):
         if serializer.is_valid():
             user = serializer.save()
             return Response(
-                UserSerializer(user).data,
+                {
+                    "message": "Registered successfully ✅",
+                    "user": UserSerializer(user).data
+                },
                 status=status.HTTP_201_CREATED
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -33,6 +38,16 @@ class RegisterView(APIView):
 
 class LoginView(TokenObtainPairView):
     permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        return Response(
+            {
+                "message": "Login successful ✅",
+                "tokens": response.data
+            },
+            status=status.HTTP_200_OK
+        )
 
 
 class LogoutView(APIView):
@@ -43,7 +58,7 @@ class LogoutView(APIView):
         try:
             token = RefreshToken(refresh)
             token.blacklist()
-            return Response(status=status.HTTP_205_RESET_CONTENT)
+            return Response({"message": "Logout successful ✅"}, status=status.HTTP_205_RESET_CONTENT)
         except Exception:
             return Response({"detail": "invalid token"}, status=400)
 
@@ -52,7 +67,10 @@ class MyProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response(UserSerializer(request.user).data)
+        return Response({
+            "message": "Profile fetched successfully ✅",
+            "profile": UserSerializer(request.user).data
+        })
 
     def put(self, request):
         user = request.user
@@ -75,7 +93,10 @@ class MyProfileView(APIView):
             ser.is_valid(raise_exception=True)
             ser.save()
 
-        return Response(UserSerializer(user).data)
+        return Response({
+            "message": "Profile updated successfully ✅",
+            "profile": UserSerializer(user).data
+        })
 
 
 # ---------- USER MANAGEMENT (Doctor/Admin only) ----------
@@ -114,9 +135,7 @@ class MedicationScheduleViewSet(viewsets.ModelViewSet):
         user = self.request.user
 
         if user.role == "patient":
-            # 👇 auto-assign patient, no need to pass it in request
             serializer.save(patient=user.patient_profile)
-
         elif user.role == "doctor":
             patient = serializer.validated_data.get("patient")
             if not patient:
@@ -124,10 +143,15 @@ class MedicationScheduleViewSet(viewsets.ModelViewSet):
             if not user.doctor_profile.patients.filter(pk=patient.pk).exists():
                 raise PermissionError("doctor not assigned to this patient")
             serializer.save()
-
-        else:  # admin
+        else:
             serializer.save()
 
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        return Response(
+            {"message": "Medication schedule created successfully ✅", "data": response.data},
+            status=status.HTTP_201_CREATED
+        )
 
 
 # ---------- ACTIVITIES ----------
@@ -154,7 +178,6 @@ class ActivityViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         user = self.request.user
         if user.role == "patient":
-            # Patients can only log activities for their own schedules
             schedule_id = self.request.data.get("schedule")
             if not schedule_id:
                 raise ValidationError({"schedule": "This field is required."})
@@ -164,23 +187,28 @@ class ActivityViewSet(viewsets.ModelViewSet):
                 raise PermissionDenied("You can only log activities for your own schedules.")
             serializer.save(schedule=schedule)
         elif user.role == "doctor":
-            # Doctors cannot create activities
             raise PermissionDenied("Doctors cannot create activities.")
         else:
-            # Admin or system users
             serializer.save()
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        return Response(
+            {"message": "Activity created successfully ✅", "data": response.data},
+            status=status.HTTP_201_CREATED
+        )
 
     def update(self, request, *args, **kwargs):
         if request.user.role == "doctor":
             return Response({"detail": "doctors cannot modify activities"}, status=403)
-        return super().update(request, *args, **kwargs)
+        response = super().update(request, *args, **kwargs)
+        return Response({"message": "Activity updated successfully ✅", "data": response.data})
 
     def destroy(self, request, *args, **kwargs):
         if request.user.role == "doctor":
             return Response({"detail": "doctors cannot delete activities"}, status=403)
-        return super().destroy(request, *args, **kwargs)
- 
-
+        super().destroy(request, *args, **kwargs)
+        return Response({"message": "Activity deleted successfully ✅"}, status=200)
 
 
 # ---------- ANALYTICS ----------
@@ -206,6 +234,7 @@ class AdherenceSummaryView(APIView):
         days = 7 if rng == "7d" else 30
         data = adherence_summary_for_patient(patient, days=days)
         return Response({
+            "message": "Adherence summary fetched successfully ✅",
             "patient_id": patient_id,
             "range": rng,
             "total_doses": data["total"],
@@ -240,7 +269,11 @@ class AdherenceHistoryView(APIView):
             qs = qs.filter(date_time__date__gte=start)
         if end:
             qs = qs.filter(date_time__date__lte=end)
-        return Response({"patient_id": patient_id, "results": ActivitySerializer(qs, many=True).data})
+        return Response({
+            "message": "Adherence history fetched successfully ✅",
+            "patient_id": patient_id,
+            "results": ActivitySerializer(qs, many=True).data
+        })
 
 
 # ---------- NOTIFICATIONS ----------
@@ -248,6 +281,21 @@ class NotificationViewSet(viewsets.ModelViewSet):
     queryset = Notification.objects.select_related("patient", "patient__user")
     serializer_class = NotificationSerializer
     permission_classes = [IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        return Response(
+            {"message": "Notification created successfully ✅", "data": response.data},
+            status=status.HTTP_201_CREATED
+        )
+
+    def update(self, request, *args, **kwargs):
+        response = super().update(request, *args, **kwargs)
+        return Response({"message": "Notification updated successfully ✅", "data": response.data})
+
+    def destroy(self, request, *args, **kwargs):
+        super().destroy(request, *args, **kwargs)
+        return Response({"message": "Notification deleted successfully ✅"}, status=200)
 
 
 class NotificationSendView(APIView):
@@ -265,4 +313,4 @@ class NotificationSendView(APIView):
             return Response({"detail": "patient not found"}, status=404)
 
         Notification.objects.create(patient=patient, message=msg, sent_at=timezone.now())
-        return Response({"detail": "notification queued"}, status=201)
+        return Response({"message": "Notification queued successfully ✅"}, status=201)
